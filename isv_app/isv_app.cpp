@@ -93,6 +93,10 @@
     ((unsigned int*)(ptr))[4] = temp;                                       \
 }
 
+#define TPM_PUBKEY_FILE "/home/sgx/Schreibtisch/TSS/utils/pubkey.txt"
+#define TPM_ATTEST_FILE "/home/sgx/Schreibtisch/TSS/utils/attest"
+#define TPM_SIGNATURE_FILE "/home/sgx/Schreibtisch/TSS/utils/attestsig"
+
 uint8_t* msg1_samples[] = { msg1_sample1, msg1_sample2 };
 uint8_t* msg2_samples[] = { msg2_sample1, msg2_sample2 };
 uint8_t* msg3_samples[MSG3_BODY_SIZE] = { msg3_sample1, msg3_sample2 };
@@ -187,7 +191,7 @@ void PRINT_ATTESTATION_SERVICE_RESPONSE(
     }
 }
 
-/*TODO: Fehlerbehndlung und return behandlung bei fehler*/
+/*TODO: Error handling*/
 /*read file in memorys*/
 void* readFileInMemory(const char *filename, long* OutfileSize) 
 {
@@ -706,16 +710,11 @@ int main(int argc, char* argv[])
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 //PUBLIC-KEY////////////////////////////////////////////
-//TODO File sizes hard coded
-			sgx_ec256_public_t *public_key_be = (sgx_ec256_public_t *) malloc(
-					sizeof(sgx_ec256_public_t));
-			sgx_ec256_public_t *public_key = (sgx_ec256_public_t *) malloc(
-					sizeof(sgx_ec256_public_t)); //public key in big endian format from TPM
-			sgx_ec256_signature_t *signature_be =
-					(sgx_ec256_signature_t *) malloc(
-							sizeof(sgx_ec256_signature_t));
-			sgx_ec256_signature_t *signature = (sgx_ec256_signature_t *) malloc(
-					sizeof(sgx_ec256_signature_t));
+//TODO File sizes hard coded. Currently no better proceed possible. 
+			sgx_ec256_public_t *public_key_be = (sgx_ec256_public_t *) malloc(sizeof(sgx_ec256_public_t));
+			sgx_ec256_public_t *public_key = (sgx_ec256_public_t *) malloc(sizeof(sgx_ec256_public_t)); //public key in big endian format from TPM
+			sgx_ec256_signature_t *signature_be = (sgx_ec256_signature_t *) malloc(sizeof(sgx_ec256_signature_t));
+			sgx_ec256_signature_t *signature = (sgx_ec256_signature_t *) malloc(sizeof(sgx_ec256_signature_t));
 			uint8_t *attest_file = (uint8_t *) malloc(113); //usually 113 Byte
 			uint8_t *pk_file = (uint8_t *) malloc(90); //usually 90 Byte (22 byte Header+ (2*32+2 bytes pk.gx, pk.gy + size)
 			uint8_t *sig_file = (uint8_t *) malloc(72); //usually 72 Byte
@@ -724,16 +723,14 @@ int main(int argc, char* argv[])
 			uint32_t attest_size;
 
 			long fileSize = 0;
-			pk_file = (uint8_t *) readFileInMemory(
-					"/home/sgx/Schreibtisch/TSS/utils/pubkey.txt", &fileSize); //TODO
+			pk_file = (uint8_t *) readFileInMemory(TPM_PUBKEY_FILE, &fileSize);
 
-			/*check public Area header*/
+			/*check public Area header. Print errors and SGX_FAILURE on failure or throw EXIT_SUCCESS on success. */
 			if (checkPublicArea(pk_file) != EXIT_SUCCESS) {
 				goto CLEANUP;
-				//TODO
 			}
 
-			pk_file = &pk_file[22]; //jump over header, see method above //TODO
+			pk_file = &pk_file[22]; //jump over header, see method above //TODO alternative?
 
 			memcpy(&public_key_be->gx, &pk_file[2], (int) pk_file[1]); //FileSize of x (usually 32 byte) is in second Byte[1] (first Byte [0] only for sizes higher than 255), data begin at third byte [2]
 			memcpy(&public_key_be->gy, &pk_file[(int) pk_file[1] + 4],
@@ -755,16 +752,13 @@ int main(int argc, char* argv[])
 
 			if (EXTENDED_DEBUG) {
 				fprintf(OUTPUT, "\npublic_key->gx - \n");
-				PRINT_BYTE_ARRAY(OUTPUT, &(public_key->gx),
-						sizeof(public_key->gx));
+				PRINT_BYTE_ARRAY(OUTPUT, &(public_key->gx), sizeof(public_key->gx));
 				fprintf(OUTPUT, "\npublic_key->gy - \n");
-				PRINT_BYTE_ARRAY(OUTPUT, &(public_key->gy),
-						sizeof(public_key->gy));
+				PRINT_BYTE_ARRAY(OUTPUT, &(public_key->gy), sizeof(public_key->gy));
 			}
 
 //ATTEST-DATA////////////////////////////////////////////
-			attest_file = (uint8_t *) readFileInMemory(
-					"/home/sgx/Schreibtisch/TSS/utils/attest", &fileSize);
+			attest_file = (uint8_t *) readFileInMemory(TPM_ATTEST_FILE, &fileSize);
 			attest_size = 113;
 
 			if (EXTENDED_DEBUG) {
@@ -774,12 +768,11 @@ int main(int argc, char* argv[])
 
 //SIGNATURE!!////////////////////////////////////////////
 			fileSize = 0;
-			sig_file = (uint8_t *) readFileInMemory(
-					"/home/sgx/Schreibtisch/TSS/utils/attestsig", &fileSize); //TODO
+			sig_file = (uint8_t *) readFileInMemory(TPM_SIGNATURE_FILE, &fileSize);
 
-			/*Signature check TODO:*/
+			/*TODO: Signature check*/
 
-			sig_file = &sig_file[4]; //jump over header (4 Bytes) //TODO
+			sig_file = &sig_file[4]; //jump over header (4 Bytes) //TODO -alternative ?
 
 			memcpy(signature->x, &sig_file[2], (int) sig_file[1]); //FileSize of x (usually 32 byte) is in second Byte[1] (first Byte [0] only for sizes higher than 255), data begin at third byte [2]
 			memcpy(signature->y, &sig_file[(int) sig_file[1] + 4],

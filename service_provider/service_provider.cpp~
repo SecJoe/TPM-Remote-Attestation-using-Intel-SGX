@@ -56,7 +56,8 @@
 #endif
 
 //debug TPM Attestation events
-#define EXTENDED_DEBUG       0
+#define EXTENDED_DEBUG       1
+
 
 // This is supported extended epid group of SP. SP can support more than one
 // extended epid group with different extended epid group id and credentials.
@@ -111,6 +112,9 @@ typedef struct _sp_db_item_t
 }sp_db_item_t;
 static sp_db_item_t g_sp_db;
 
+//-----TODOs------
+////TODO: treat time out of network response in sp as attestation failure.
+
 static const sample_extended_epid_group* g_sp_extended_epid_group_id= NULL;
 static bool g_is_sp_registered = false;
 static int g_sp_credentials = 0;
@@ -143,7 +147,7 @@ void PRINT_BYTE_ARRAY(
 }
 
 void handleErrors(){
-//TODO: umbenennen
+//TODO: rename
 printf("Error in crypto method");
 
 }
@@ -838,7 +842,7 @@ int sp_ra_proc_msg3_req(const sample_ra_msg3_t *p_msg3,
            (isv_policy_passed == true))
         {
 
-		//TODO einrückungen überall richtig (gleich) machen. Evtl überall überarbeiten (code in einer Zeile...)
+		//TODO rework indentation of code.
 
 		ret = sample_rijndael128GCM_encrypt(&g_sp_db.sk_key,
         			(uint8_t *) &p_unencrypted_tpm_att_request_msg->platform_info_blob,
@@ -852,7 +856,6 @@ int sp_ra_proc_msg3_req(const sample_ra_msg3_t *p_msg3,
         }
     }while(0);
 
-	//TODO: Debugging mit Variable enschaltbar. (Auch Intel Code Debugging).
 	if (EXTENDED_DEBUG) {
 			printf("Service Provider, request ciphertext: \n");
 			PRINT_BYTE_ARRAY(OUTPUT, p_encrypted_tpm_att_request_msg->ciphertext, sizeof(ias_platform_info_blob_t));

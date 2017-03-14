@@ -29,7 +29,7 @@
  *
  */
 
-//TODO: Alles Mit Javadoc (func-variablen auch beschreiben unso)
+//TODO: Describe all function with parameters detailed.
 
 
 #include <assert.h>
@@ -327,9 +327,6 @@ sgx_status_t check_pcr(
 	return SGX_ERROR_UNEXPECTED;
 }
 
-
-// TODO: Text mit Vars beschreiben
-
 sgx_status_t secure_verify(
     sgx_ra_context_t context,
     tpm_enc_att_state_request_message_t *encrypted_req_message,
@@ -338,7 +335,7 @@ sgx_status_t secure_verify(
     uint8_t *tpm_attest_data,
     uint32_t tpm_attest_data_size,
     sgx_ec256_signature_t *tpm_signature,
-	uint32_t tpm_pcr_size,
+	uint32_t tpm_pcr_size, //TODO not needed, always the sem size?
 	tpm_enc_att_state_response_message_t *p_ver_msg_out,
 	uint32_t ver_msg_size)
 {
@@ -355,7 +352,7 @@ sgx_status_t secure_verify(
 	
 	
 
-	//TODO: ver_msg_size = length edl file, anders handeln
+	//TODO: ver_msg_size = field size needed for edl, alternative?
 
 	//Pre checks
 	if(encrypted_req_message == NULL)
@@ -394,7 +391,7 @@ sgx_status_t secure_verify(
 	}
 
 	//Check correct sizes
-	//TODO: Check löschen (warum sons size als paramater)
+	//TODO: delete check?
 	if(request_msg_size != 129)
 	{
 		PrintError("secure_verify: Wrong request_msg_size. In this confguration messages_size should be 129 bytes.");
@@ -469,21 +466,20 @@ sgx_status_t secure_verify(
 	memcpy(&p_ver_msg_out->nonce.nonce[0], &encrypted_req_message->nonce.nonce[0], AES_GCM_IV_SIZE);
 	p_ver_msg_out->nonce.nonce_size = encrypted_req_message->nonce.nonce_size;
 
-	//TODO: in SP timeout response behandeln
-
 				//encrypt tpm attest message with nonce and save mac additionally
 				ret = sgx_rijndael128GCM_encrypt(&sk_key, (uint8_t *) unencrypted_resp_msg, sizeof(tpm_unenc_att_state_response_message_t),  &p_ver_msg_out->ciphertext[0], &p_ver_msg_out->nonce.nonce[0], p_ver_msg_out->nonce.nonce_size, NULL, 0, &p_ver_msg_out->mac);
 
-				PrintError("Enclave Cipher: \n");
+				//TODO: Debugging of enclave operations is a security problem. Delete it in release mode.
+				PrintError("Debug: Enclave Cipher: \n");
 				PrintError_array(&p_ver_msg_out->ciphertext[0]);
 
-				PrintError("Enclave IV: \n");
+				PrintError("Debug: Enclave IV: \n");
 				PrintError_array(&p_ver_msg_out->nonce.nonce[0]);
 
-				PrintError("Enclave Key: \n");
+				PrintError("Debug: Enclave Key: \n");
 				PrintError_array(&sk_key[0]);
 
-				PrintError("Enclave MAC: \n");
+				PrintError("Debug: Enclave MAC: \n");
 				PrintError_array(&p_ver_msg_out->mac[0]);
 				
 				if(ret == SGX_ERROR_INVALID_PARAMETER){
