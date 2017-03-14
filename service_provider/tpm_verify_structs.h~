@@ -1,0 +1,20 @@
+#define BOOLEAN_TPM_VERIFY_STATE 1
+#define SAMPLE_MAC_SIZE             16  /* Message Authentication Code*/
+                                        /* - 16 bytes*/
+#define SAMPLE_SP_TAG_SIZE          16
+
+
+
+
+typedef uint8_t                     sample_mac_t[SAMPLE_MAC_SIZE];
+
+typedef struct tpm_platform_info_blob_t
+{
+	 uint8_t tpm_verify_status[BOOLEAN_TPM_VERIFY_STATE];
+} tpm_platform_info_blob_t;
+
+typedef struct tpm_verify_state_message_t {
+    tpm_platform_info_blob_t    tpm_platform_info_blob;
+    sample_mac_t                mac;    /* mac_smk(attestation_status)*/
+    sp_aes_gcm_data_t           secret;
+} tpm_verify_state_message_t;
