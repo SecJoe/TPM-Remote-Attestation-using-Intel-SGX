@@ -131,8 +131,7 @@ int sp_ra_proc_msg3_req(const sample_ra_msg3_t *p_msg3,
                         ra_samp_response_header_t **pp_att_result_msg);
 
 int sp_ra_proc_msg_tpm_attest_confirm(tpm_enc_att_state_response_message_t *p_ver_msg,
-                        uint32_t ver_msg_size,
-                        ra_samp_response_header_t **no);
+                        uint32_t ver_msg_size);
 int sp_ra_free_msg2(
     sample_ra_msg2_t *p_msg2);
 

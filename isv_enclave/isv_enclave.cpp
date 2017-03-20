@@ -29,14 +29,14 @@
  *
  */
 
-//TODO: Describe all function with parameters detailed.
-
-
 #include <assert.h>
 #include "isv_enclave_t.h"
 #include "sgx_tkey_exchange.h"
 #include "sgx_tcrypto.h"
 #include "string.h"
+
+//debug TPM Attestation events. Disable this if enclave will be released because otherwise this is security problem.
+#define EXTENDED_DEBUG       1
 
 // This is the public EC key of the SP. The corresponding private EC key is
 // used by the SP to sign data used in the remote attestation SIGMA protocol
@@ -49,19 +49,12 @@
 // must have a unique SP public key. Delivery of the SP public key is
 // determined by the ISV. The TKE SIGMA protocl expects an Elliptical Curve key
 // based on NIST P-256
-static const sgx_ec256_public_t g_sp_pub_key = {
-    {
-        0x72, 0x12, 0x8a, 0x7a, 0x17, 0x52, 0x6e, 0xbf,
-        0x85, 0xd0, 0x3a, 0x62, 0x37, 0x30, 0xae, 0xad,
-        0x3e, 0x3d, 0xaa, 0xee, 0x9c, 0x60, 0x73, 0x1d,
-        0xb0, 0x5b, 0xe8, 0x62, 0x1c, 0x4b, 0xeb, 0x38
-    },
-    {
-        0xd4, 0x81, 0x40, 0xd9, 0x50, 0xe2, 0x57, 0x7b,
-        0x26, 0xee, 0xb7, 0x41, 0xe7, 0xc6, 0x14, 0xe2,
-        0x24, 0xb7, 0xbd, 0xc9, 0x03, 0xf2, 0x9a, 0x28,
-        0xa8, 0x3c, 0xc8, 0x10, 0x11, 0x14, 0x5e, 0x06
-    }
+static const sgx_ec256_public_t g_sp_pub_key = { { 0x72, 0x12, 0x8a, 0x7a, 0x17,
+		0x52, 0x6e, 0xbf, 0x85, 0xd0, 0x3a, 0x62, 0x37, 0x30, 0xae, 0xad, 0x3e,
+		0x3d, 0xaa, 0xee, 0x9c, 0x60, 0x73, 0x1d, 0xb0, 0x5b, 0xe8, 0x62, 0x1c,
+		0x4b, 0xeb, 0x38 }, { 0xd4, 0x81, 0x40, 0xd9, 0x50, 0xe2, 0x57, 0x7b,
+		0x26, 0xee, 0xb7, 0x41, 0xe7, 0xc6, 0x14, 0xe2, 0x24, 0xb7, 0xbd, 0xc9,
+		0x03, 0xf2, 0x9a, 0x28, 0xa8, 0x3c, 0xc8, 0x10, 0x11, 0x14, 0x5e, 0x06 }
 
 };
 
@@ -73,76 +66,76 @@ static const sgx_ec256_public_t g_sp_pub_key = {
 
 typedef struct _hash_buffer_t
 {
-    uint8_t counter[4];
-    sgx_ec256_dh_shared_t shared_secret;
-    uint8_t algorithm_id[4];
-} hash_buffer_t;
+	uint8_t counter[4];
+	sgx_ec256_dh_shared_t shared_secret;
+	uint8_t algorithm_id[4];
+}hash_buffer_t;
 
 const char ID_U[] = "SGXRAENCLAVE";
 const char ID_V[] = "SGXRASERVER";
 
 // Derive two keys from shared key and key id.
 bool derive_key(
-    const sgx_ec256_dh_shared_t *p_shared_key,
-    uint8_t key_id,
-    sgx_ec_key_128bit_t *first_derived_key,
-    sgx_ec_key_128bit_t *second_derived_key)
+		const sgx_ec256_dh_shared_t *p_shared_key,
+		uint8_t key_id,
+		sgx_ec_key_128bit_t *first_derived_key,
+		sgx_ec_key_128bit_t *second_derived_key)
 {
-    sgx_status_t sgx_ret = SGX_SUCCESS;
-    hash_buffer_t hash_buffer;
-    sgx_sha_state_handle_t sha_context;
-    sgx_sha256_hash_t key_material;
+	sgx_status_t sgx_ret = SGX_SUCCESS;
+	hash_buffer_t hash_buffer;
+	sgx_sha_state_handle_t sha_context;
+	sgx_sha256_hash_t key_material;
 
-    memset(&hash_buffer, 0, sizeof(hash_buffer_t));
-    /* counter in big endian  */
-    hash_buffer.counter[3] = key_id;
+	memset(&hash_buffer, 0, sizeof(hash_buffer_t));
+	/* counter in big endian  */
+	hash_buffer.counter[3] = key_id;
 
-    /*convert from little endian to big endian */
-    for (size_t i = 0; i < sizeof(sgx_ec256_dh_shared_t); i++)
-    {
-        hash_buffer.shared_secret.s[i] = p_shared_key->s[sizeof(p_shared_key->s)-1 - i];
-    }
+	/*convert from little endian to big endian */
+	for (size_t i = 0; i < sizeof(sgx_ec256_dh_shared_t); i++)
+	{
+		hash_buffer.shared_secret.s[i] = p_shared_key->s[sizeof(p_shared_key->s)-1 - i];
+	}
 
-    sgx_ret = sgx_sha256_init(&sha_context);
-    if (sgx_ret != SGX_SUCCESS)
-    {
-        return false;
-    }
-    sgx_ret = sgx_sha256_update((uint8_t*)&hash_buffer, sizeof(hash_buffer_t), sha_context);
-    if (sgx_ret != SGX_SUCCESS)
-    {
-        sgx_sha256_close(sha_context);
-        return false;
-    }
-    sgx_ret = sgx_sha256_update((uint8_t*)&ID_U, sizeof(ID_U), sha_context);
-    if (sgx_ret != SGX_SUCCESS)
-    {
-        sgx_sha256_close(sha_context);
-        return false;
-    }
-    sgx_ret = sgx_sha256_update((uint8_t*)&ID_V, sizeof(ID_V), sha_context);
-    if (sgx_ret != SGX_SUCCESS)
-    {
-        sgx_sha256_close(sha_context);
-        return false;
-    }
-    sgx_ret = sgx_sha256_get_hash(sha_context, &key_material);
-    if (sgx_ret != SGX_SUCCESS)
-    {
-        sgx_sha256_close(sha_context);
-        return false;
-    }
-    sgx_ret = sgx_sha256_close(sha_context);
+	sgx_ret = sgx_sha256_init(&sha_context);
+	if (sgx_ret != SGX_SUCCESS)
+	{
+		return false;
+	}
+	sgx_ret = sgx_sha256_update((uint8_t*)&hash_buffer, sizeof(hash_buffer_t), sha_context);
+	if (sgx_ret != SGX_SUCCESS)
+	{
+		sgx_sha256_close(sha_context);
+		return false;
+	}
+	sgx_ret = sgx_sha256_update((uint8_t*)&ID_U, sizeof(ID_U), sha_context);
+	if (sgx_ret != SGX_SUCCESS)
+	{
+		sgx_sha256_close(sha_context);
+		return false;
+	}
+	sgx_ret = sgx_sha256_update((uint8_t*)&ID_V, sizeof(ID_V), sha_context);
+	if (sgx_ret != SGX_SUCCESS)
+	{
+		sgx_sha256_close(sha_context);
+		return false;
+	}
+	sgx_ret = sgx_sha256_get_hash(sha_context, &key_material);
+	if (sgx_ret != SGX_SUCCESS)
+	{
+		sgx_sha256_close(sha_context);
+		return false;
+	}
+	sgx_ret = sgx_sha256_close(sha_context);
 
-    assert(sizeof(sgx_ec_key_128bit_t)* 2 == sizeof(sgx_sha256_hash_t));
-    memcpy(first_derived_key, &key_material, sizeof(sgx_ec_key_128bit_t));
-    memcpy(second_derived_key, (uint8_t*)&key_material + sizeof(sgx_ec_key_128bit_t), sizeof(sgx_ec_key_128bit_t));
+	assert(sizeof(sgx_ec_key_128bit_t)* 2 == sizeof(sgx_sha256_hash_t));
+	memcpy(first_derived_key, &key_material, sizeof(sgx_ec_key_128bit_t));
+	memcpy(second_derived_key, (uint8_t*)&key_material + sizeof(sgx_ec_key_128bit_t), sizeof(sgx_ec_key_128bit_t));
 
-    // memset here can be optimized away by compiler, so please use memset_s on
-    // windows for production code and similar functions on other OSes.
-    memset(&key_material, 0, sizeof(sgx_sha256_hash_t));
+	// memset here can be optimized away by compiler, so please use memset_s on
+	// windows for production code and similar functions on other OSes.
+	memset(&key_material, 0, sizeof(sgx_sha256_hash_t));
 
-    return true;
+	return true;
 }
 
 //isv defined key derivation function id
@@ -150,46 +143,46 @@ bool derive_key(
 
 typedef enum _derive_key_type_t
 {
-    DERIVE_KEY_SMK_SK = 0,
-    DERIVE_KEY_MK_VK,
-} derive_key_type_t;
+	DERIVE_KEY_SMK_SK = 0,
+	DERIVE_KEY_MK_VK,
+}derive_key_type_t;
 
 sgx_status_t key_derivation(const sgx_ec256_dh_shared_t* shared_key,
-    uint16_t kdf_id,
-    sgx_ec_key_128bit_t* smk_key,
-    sgx_ec_key_128bit_t* sk_key,
-    sgx_ec_key_128bit_t* mk_key,
-    sgx_ec_key_128bit_t* vk_key)
+		uint16_t kdf_id,
+		sgx_ec_key_128bit_t* smk_key,
+		sgx_ec_key_128bit_t* sk_key,
+		sgx_ec_key_128bit_t* mk_key,
+		sgx_ec_key_128bit_t* vk_key)
 {
-    bool derive_ret = false;
+	bool derive_ret = false;
 
-    if (NULL == shared_key)
-    {
-        return SGX_ERROR_INVALID_PARAMETER;
-    }
+	if (NULL == shared_key)
+	{
+		return SGX_ERROR_INVALID_PARAMETER;
+	}
 
-    if (ISV_KDF_ID != kdf_id)
-    {
-        //fprintf(stderr, "\nError, key derivation id mismatch in [%s].", __FUNCTION__);
-        return SGX_ERROR_KDF_MISMATCH;
-    }
+	if (ISV_KDF_ID != kdf_id)
+	{
+		//fprintf(stderr, "\nError, key derivation id mismatch in [%s].", __FUNCTION__);
+		return SGX_ERROR_KDF_MISMATCH;
+	}
 
-    derive_ret = derive_key(shared_key, DERIVE_KEY_SMK_SK,
-        smk_key, sk_key);
-    if (derive_ret != true)
-    {
-        //fprintf(stderr, "\nError, derive key fail in [%s].", __FUNCTION__);
-        return SGX_ERROR_UNEXPECTED;
-    }
+	derive_ret = derive_key(shared_key, DERIVE_KEY_SMK_SK,
+			smk_key, sk_key);
+	if (derive_ret != true)
+	{
+		//fprintf(stderr, "\nError, derive key fail in [%s].", __FUNCTION__);
+		return SGX_ERROR_UNEXPECTED;
+	}
 
-    derive_ret = derive_key(shared_key, DERIVE_KEY_MK_VK,
-        mk_key, vk_key);
-    if (derive_ret != true)
-    {
-        //fprintf(stderr, "\nError, derive key fail in [%s].", __FUNCTION__);
-        return SGX_ERROR_UNEXPECTED;
-    }
-    return SGX_SUCCESS;
+	derive_ret = derive_key(shared_key, DERIVE_KEY_MK_VK,
+			mk_key, vk_key);
+	if (derive_ret != true)
+	{
+		//fprintf(stderr, "\nError, derive key fail in [%s].", __FUNCTION__);
+		return SGX_ERROR_UNEXPECTED;
+	}
+	return SGX_SUCCESS;
 }
 #else
 #pragma message ("Default key derivation function is used.")
@@ -210,34 +203,28 @@ sgx_status_t key_derivation(const sgx_ec256_dh_shared_t* shared_key,
 // @return Any error returned from the trusted key exchange API
 //         for creating a key context.
 
-sgx_status_t enclave_init_ra(
-    int b_pse,
-    sgx_ra_context_t *p_context)
-{
-    // isv enclave call to trusted key exchange library.
-    sgx_status_t ret;
-    if(b_pse)
-    {
-        int busy_retry_times = 2;
-        do{
-            ret = sgx_create_pse_session();
-        }while (ret == SGX_ERROR_BUSY && busy_retry_times--);
-        if (ret != SGX_SUCCESS)
-            return ret;
-    }
+sgx_status_t enclave_init_ra(int b_pse, sgx_ra_context_t *p_context) {
+	// isv enclave call to trusted key exchange library.
+	sgx_status_t ret;
+	if (b_pse) {
+		int busy_retry_times = 2;
+		do {
+			ret = sgx_create_pse_session();
+		} while (ret == SGX_ERROR_BUSY && busy_retry_times--);
+		if (ret != SGX_SUCCESS)
+			return ret;
+	}
 #ifdef SUPPLIED_KEY_DERIVATION
-    ret = sgx_ra_init_ex(&g_sp_pub_key, b_pse, key_derivation, p_context);
+	ret = sgx_ra_init_ex(&g_sp_pub_key, b_pse, key_derivation, p_context);
 #else
-    ret = sgx_ra_init(&g_sp_pub_key, b_pse, p_context);
+	ret = sgx_ra_init(&g_sp_pub_key, b_pse, p_context);
 #endif
-    if(b_pse)
-    {
-        sgx_close_pse_session();
-        return ret;
-    }
-    return ret;
+	if (b_pse) {
+		sgx_close_pse_session();
+		return ret;
+	}
+	return ret;
 }
-
 
 // Closes the tKE key context used during the SIGMA key
 // exchange.
@@ -246,172 +233,166 @@ sgx_status_t enclave_init_ra(
 //
 // @return Return value from the key context close API
 
-sgx_status_t SGXAPI enclave_ra_close(
-    sgx_ra_context_t context)
-{
-    sgx_status_t ret;
-    ret = sgx_ra_close(context);
-    return ret;
+sgx_status_t SGXAPI enclave_ra_close(sgx_ra_context_t context) {
+	sgx_status_t ret;
+	ret = sgx_ra_close(context);
+	return ret;
 }
 
-
-//check first if the public matches the requirements (secp256r1 ECC curve).
-//After that I check if the TPM siganature is valid.
-sgx_status_t verify_ecdsa_signature(
-    sgx_ec256_public_t *public_key,
-    uint8_t *attest_data,
-    uint32_t attest_data_size,
-    sgx_ec256_signature_t *signature)
-{
+// Check first if the public matches the requirements (secp256r1 ECC curve). After that I check if the TPM siganature is valid.
+// @param public_key: The public key needed to verify the signature form the TPM. 
+// @param attest_data: The data to attest teh TPM Quote. Thats also to data signed from the TPM. 
+// @param attest_data_size: Attest data size.
+// @param signature: The signature to be verified.
+sgx_status_t verify_ecdsa_signature(sgx_ec256_public_t *public_key,
+		uint8_t *attest_data, uint32_t attest_data_size,
+		sgx_ec256_signature_t *signature) {
 
 	sgx_ecc_state_handle_t handle;
 	sgx_status_t ret;
 	uint8_t verify_signature_result;
 	int *p_check_point_valid = (int *) malloc(sizeof(int));
 
-
 	ret = sgx_ecc256_open_context(&handle);
-    if(ret != SGX_SUCCESS)
-	{
+	if (ret != SGX_SUCCESS) {
 		PrintError("sgx_ecc256_open_context - status error.");
-        return ret;
+		return ret;
 	}
 
 	ret = sgx_ecc256_check_point(public_key, handle, p_check_point_valid);
-	if(ret != SGX_SUCCESS){
-   		PrintError("sgx_ecc256_check_point error - this should never happen.");
-   		return ret;
-	}else if(*p_check_point_valid == 0){
-  		PrintError("The public key is not on the correct curve. The public key needs to match the requirements secp256r1 (NIST P-256)\n");
-  		return SGX_ERROR_UNEXPECTED;
+	if (ret != SGX_SUCCESS) {
+		PrintError("sgx_ecc256_check_point error - this should never happen.");
+		return ret;
+	} else if (*p_check_point_valid == 0) {
+		PrintError(
+				"The public key is not on the correct curve. The public key needs to match the requirements secp256r1 (NIST P-256)\n");
+		return SGX_ERROR_UNEXPECTED;
 	}
 
-	ret = sgx_ecdsa_verify(attest_data, attest_data_size, public_key, signature, &verify_signature_result, handle);
-	if(ret != SGX_SUCCESS){
-   		PrintError("sgx_ecdsa_verify - this should never happen.");
-   		return ret;
-	}else if(verify_signature_result != SGX_EC_VALID){
+	ret = sgx_ecdsa_verify(attest_data, attest_data_size, public_key, signature,
+			&verify_signature_result, handle);
+	if (ret != SGX_SUCCESS) {
+		PrintError("sgx_ecdsa_verify - this should never happen.");
+		return ret;
+	} else if (verify_signature_result != SGX_EC_VALID) {
 		PrintError("TPM signature invalid\n");
 		return SGX_ERROR_INVALID_SIGNATURE;
-	}else{
-  		return SGX_SUCCESS;
- 	}
+	} else {
+		return SGX_SUCCESS;
+	}
 }
 
 //check if the TPM PCRs are valid. I check (compare) against the hardcoded value: 0x00.
 //I hash this value before, because the PCRs are also a hash of values.
 //further you can add more PCRs here, because configuring the PCRs via ECall
 //from the untrusted code can lacerate a security hole.
-sgx_status_t check_pcr(
-    uint8_t *attest_data,
-	uint32_t attest_data_size,
-    uint32_t pcr_size)
-{
+// @param attest_data: The data to attest teh TPM Quote. Thats also to data signed from the TPM. 
+// @param attest_data_size: Attest data size.
+sgx_status_t check_pcr(uint8_t *attest_data, uint32_t attest_data_size) {
 
 	sgx_status_t status;
+	uint32_t pcr_size = 32; //PCR size actually 32 bytes because SHA-256.
 	uint8_t *pcr_digest = &attest_data[81];
 
-	sgx_sha256_hash_t *p_hash = (sgx_sha256_hash_t *) malloc(sizeof(sgx_sha256_hash_t));
+	sgx_sha256_hash_t *p_hash = (sgx_sha256_hash_t *) malloc(
+			sizeof(sgx_sha256_hash_t));
 	uint8_t *p_source = (uint8_t *) malloc(sizeof(uint8_t));
 
-	for(int i = 0; i<pcr_size; i++){
+	for (int i = 0; i < pcr_size; i++) {
 		p_source[i] = 0x00;
 	}
 
 	status = sgx_sha256_msg(p_source, pcr_size, p_hash);
 
-	if(consttime_memequal(*p_hash, pcr_digest, 32) == 1){
+	if (consttime_memequal(*p_hash, pcr_digest, 32) == 1) {
 		return SGX_SUCCESS;
 	}
 
 	return SGX_ERROR_UNEXPECTED;
 }
 
-sgx_status_t secure_verify(
-    sgx_ra_context_t context,
-    tpm_enc_att_state_request_message_t *encrypted_req_message,
-    uint32_t request_msg_size,
-	sgx_ec256_public_t *tpm_public_key,
-    uint8_t *tpm_attest_data,
-    uint32_t tpm_attest_data_size,
-    sgx_ec256_signature_t *tpm_signature,
-	uint32_t tpm_pcr_size, //TODO not needed, always the sem size?
-	tpm_enc_att_state_response_message_t *p_ver_msg_out,
-	uint32_t ver_msg_size)
-{
+/* Thats the main function callable from the unstursted code (ECALL) to verify the TPM Quote.
+ * @param context: the context of SGX (needed in every ECALL).
+ * @param encrypted_req_message: The encrypted request message form the service provider.
+ * @param request_msg_size: The message size of that message.
+ * @param tpm_public_key: The public key needed to verify the signature form the TPM.
+ * @param attest_data: The data to attest teh TPM Quote. Thats also to data signed from the TPM.
+ * @param attest_data_size: Attest data size.
+ * @param tpm_signature: The signature to be verified.
+ * @param p_ver_msg_out: The TPM attestation state response message (output message) which will be sent back to the service provider.
+ * @param ver_msg_size: The messsage size of that message (output). This field size needed because the Edge Routine needs to know the output size. Maybe someone find a alternative to this proceed.
+ */
+sgx_status_t secure_verify(sgx_ra_context_t context,
+		tpm_enc_att_state_request_message_t *encrypted_req_message,
+		uint32_t request_msg_size, sgx_ec256_public_t *tpm_public_key,
+		uint8_t *tpm_attest_data, uint32_t tpm_attest_data_size,
+		sgx_ec256_signature_t *tpm_signature,
+		tpm_enc_att_state_response_message_t *p_ver_msg_out,
+		uint32_t ver_msg_size) {
 
+	sgx_status_t ret = SGX_SUCCESS;
+	sgx_ec_key_128bit_t sk_key;
 
-    sgx_status_t ret = SGX_SUCCESS;
-    sgx_ec_key_128bit_t sk_key;
-	
 	//request messages inits
-	tpm_unenc_att_state_request_message_t *unencrypted_req_message = (tpm_unenc_att_state_request_message_t *) malloc(sizeof(tpm_unenc_att_state_request_message_t));
+	tpm_unenc_att_state_request_message_t *unencrypted_req_message =
+			(tpm_unenc_att_state_request_message_t *) malloc(
+					sizeof(tpm_unenc_att_state_request_message_t));
 
 	//response messages inits
-	tpm_unenc_att_state_response_message_t *unencrypted_resp_msg = (tpm_unenc_att_state_response_message_t*) malloc(sizeof(tpm_unenc_att_state_response_message_t));
-	
-	
-
-	//TODO: ver_msg_size = field size needed for edl, alternative?
+	tpm_unenc_att_state_response_message_t *unencrypted_resp_msg =
+			(tpm_unenc_att_state_response_message_t*) malloc(
+					sizeof(tpm_unenc_att_state_response_message_t));
 
 	//Pre checks
-	if(encrypted_req_message == NULL)
-	{
+	if (encrypted_req_message == NULL) {
 		PrintError("secure_verify: encrypted_req_message is NULL");
 		ret = SGX_ERROR_INVALID_PARAMETER;
 		return ret;
 	}
 
-	if(tpm_public_key == NULL)
-	{
+	if (tpm_public_key == NULL) {
 		PrintError("secure_verify: tpm_public_key is NULL");
 		ret = SGX_ERROR_INVALID_PARAMETER;
 		return ret;
 	}
 
-	if(tpm_attest_data == NULL)
-	{
+	if (tpm_attest_data == NULL) {
 		PrintError("secure_verify: tpm_attest_data is NULL");
 		ret = SGX_ERROR_INVALID_PARAMETER;
 		return ret;
 	}
 
-	if(tpm_signature == NULL)
-	{
+	if (tpm_signature == NULL) {
 		PrintError("secure_verify: tpm_signaure is NULL");
 		ret = SGX_ERROR_INVALID_PARAMETER;
 		return ret;
 	}
 
-	if(p_ver_msg_out == NULL)
-	{
+	if (p_ver_msg_out == NULL) {
 		PrintError("secure_verify: p_ver_msg_out is NULL");
 		ret = SGX_ERROR_INVALID_PARAMETER;
 		return ret;
 	}
 
 	//Check correct sizes
-	//TODO: delete check? 
-	if(request_msg_size != 129)
-	{
+	if (request_msg_size != 129) {
 		PrintError("secure_verify: Wrong request_msg_size. In this confguration messages_size should be 129 bytes.");
 		ret = SGX_ERROR_INVALID_PARAMETER;
 		return ret;
 	}
 
-	if(ver_msg_size == sizeof(tpm_unenc_att_state_response_message_t)){
-		PrintError("secure_verify: Wrong ver_msg_size. In this confguration ver_size should be == sizeof(tpm_unenc_att_state_response_message_t)");
+	if (ver_msg_size == sizeof(tpm_unenc_att_state_response_message_t)) {
+		PrintError(
+				"secure_verify: Wrong ver_msg_size. In this confguration ver_size should be == sizeof(tpm_unenc_att_state_response_message_t)");
 		ret = SGX_ERROR_INVALID_PARAMETER;
 		return ret;
 	}
-
 
 	//!!!!!!Checks done, beginning of the computation-block
 
 	//Obtain key to decrypt the message from the service-Provider. key was negotiated bafore with SIGMA-like protocol.
 	ret = sgx_ra_get_keys(context, SGX_RA_KEY_SK, &sk_key);
-	if(SGX_SUCCESS != ret)
-	{
+	if (SGX_SUCCESS != ret) {
 		PrintError("secure_verify: Can not obtain decryption key in enclave.");
 		return ret;
 	}
@@ -419,82 +400,94 @@ sgx_status_t secure_verify(
 	//Decrypt message from service provider (SP) and save it in unencrypted_req_message->platform_info_blob.
 	//AES-GCM provides authenticity (message is from SP), confidentiality (message is encrypted),
 	//Integrity and freshness (if the SP provides unique Nonces in every message. My SP provides this).
-	ret = sgx_rijndael128GCM_decrypt(&sk_key,
-									(uint8_t *) encrypted_req_message,
-									sizeof(ias_platform_info_blob_t),
-									(uint8_t *) &unencrypted_req_message->platform_info_blob,
-									&encrypted_req_message->nonce.nonce[0],
-									encrypted_req_message->nonce.nonce_size,
-									NULL,
-									0,
-									&encrypted_req_message->mac);
+	ret = sgx_rijndael128GCM_decrypt(&sk_key, (uint8_t *) encrypted_req_message,
+			sizeof(ias_platform_info_blob_t),
+			(uint8_t *) &unencrypted_req_message->platform_info_blob,
+			&encrypted_req_message->nonce.nonce[0],
+			encrypted_req_message->nonce.nonce_size,
+			NULL, 0, &encrypted_req_message->mac);
 
 	//Check on some errors while decryption.
-	if(ret == SGX_ERROR_MAC_MISMATCH){
+	if (ret == SGX_ERROR_MAC_MISMATCH) {
 		PrintError("secure_verify: enclave request decrypt: mac missmatch\n");
-	}else if(ret == SGX_ERROR_INVALID_PARAMETER){
-		PrintError("secure_verify: enclave request decrypt: invalid parameter\n");
-	}else if(ret == SGX_ERROR_OUT_OF_MEMORY){
+	} else if (ret == SGX_ERROR_INVALID_PARAMETER) {
+		PrintError(
+				"secure_verify: enclave request decrypt: invalid parameter\n");
+	} else if (ret == SGX_ERROR_OUT_OF_MEMORY) {
 		PrintError("secure_verify: enclave request decrypt: out of memory\n");
-	}else if(ret == SGX_ERROR_UNEXPECTED){	
-		PrintError("secure_verify: enclave request decrypt: unexcepted error - sgx internal error\n");
-	}else if(ret == SGX_SUCCESS){
+	} else if (ret == SGX_ERROR_UNEXPECTED) {
+		PrintError(
+				"secure_verify: enclave request decrypt: unexcepted error - sgx internal error\n");
+	} else if (ret == SGX_SUCCESS) {
 		//PrintError("secure_verify: enclave request decrypt: SUCCESS\n");
-	}else{
-		PrintError("secure_verify: enclave request decrypt: Fatal Error - Undocumented Error!?\n");
+	} else {
+		PrintError(
+				"secure_verify: enclave request decrypt: Fatal Error - Undocumented Error!?\n");
 		return ret;
-	}	
-
+	}
 
 	//!!!!!Start TPM Quote validation
-	
+
 	//Check if the curve is correct and if the signature is valid (more information see implemention of this method above)
-	ret = verify_ecdsa_signature(tpm_public_key, tpm_attest_data, tpm_attest_data_size, tpm_signature);
+	ret = verify_ecdsa_signature(tpm_public_key, tpm_attest_data,
+			tpm_attest_data_size, tpm_signature);
 
 	if (ret == SGX_SUCCESS) {
 		//check if PCRs are correct (more information see implemention of this method above)
-		ret = check_pcr(tpm_attest_data, tpm_attest_data_size, tpm_pcr_size);
+		ret = check_pcr(tpm_attest_data, tpm_attest_data_size);
 	}
 
-	if(ret == SGX_SUCCESS){
-		unencrypted_resp_msg->tpm_platform_info_blob.tpm_verify_status[0] = 0xEF; //tpm attestation successful.
-	}else{
-		unencrypted_resp_msg->tpm_platform_info_blob.tpm_verify_status[0] = 0x00; //tpm attestation not successful.
+	if (ret == SGX_SUCCESS) {
+		unencrypted_resp_msg->tpm_platform_info_blob.tpm_verify_status[0] =
+				0xEF; //tpm attestation successful.
+	} else {
+		unencrypted_resp_msg->tpm_platform_info_blob.tpm_verify_status[0] =
+				0x00; //tpm attestation not successful.
 	}
-	
+
 	//equip response message with Nonce and size of Nonce
-	memcpy(&p_ver_msg_out->nonce.nonce[0], &encrypted_req_message->nonce.nonce[0], AES_GCM_IV_SIZE);
+	memcpy(&p_ver_msg_out->nonce.nonce[0],
+			&encrypted_req_message->nonce.nonce[0], AES_GCM_IV_SIZE);
 	p_ver_msg_out->nonce.nonce_size = encrypted_req_message->nonce.nonce_size;
 
-				//encrypt tpm attest message with nonce and save mac additionally
-				ret = sgx_rijndael128GCM_encrypt(&sk_key, (uint8_t *) unencrypted_resp_msg, sizeof(tpm_unenc_att_state_response_message_t),  &p_ver_msg_out->ciphertext[0], &p_ver_msg_out->nonce.nonce[0], p_ver_msg_out->nonce.nonce_size, NULL, 0, &p_ver_msg_out->mac);
+	//encrypt tpm attest message with nonce and save mac additionally
+	ret = sgx_rijndael128GCM_encrypt(&sk_key, (uint8_t *) unencrypted_resp_msg,
+			sizeof(tpm_unenc_att_state_response_message_t),
+			&p_ver_msg_out->ciphertext[0], &p_ver_msg_out->nonce.nonce[0],
+			p_ver_msg_out->nonce.nonce_size, NULL, 0, &p_ver_msg_out->mac);
 
-				//TODO: Debugging of enclave operations is a security problem. Delete it in release mode.
-				PrintError("Debug: Enclave Cipher: \n");
-				PrintError_array(&p_ver_msg_out->ciphertext[0]);
+	//Debugging enclave operations is a security problem. Disable this in release mode.
+	if (EXTENDED_DEBUG) {
+		PrintError("Debug: Enclave Debugging Enabled. Please dont use it in enclave release mode!!!\n");
+		PrintError("Debug: Enclave Cipher: \n");
+		PrintError_array(&p_ver_msg_out->ciphertext[0]);
 
-				PrintError("Debug: Enclave IV: \n");
-				PrintError_array(&p_ver_msg_out->nonce.nonce[0]);
+		PrintError("Debug: Enclave IV: \n");
+		PrintError_array(&p_ver_msg_out->nonce.nonce[0]);
 
-				PrintError("Debug: Enclave Key: \n");
-				PrintError_array(&sk_key[0]);
+		PrintError("Debug: Enclave Key: \n");
+		PrintError_array(&sk_key[0]);
 
-				PrintError("Debug: Enclave MAC: \n");
-				PrintError_array(&p_ver_msg_out->mac[0]);
-				
-				if(ret == SGX_ERROR_INVALID_PARAMETER){
-					PrintError("secure_verify: enclave response encrypt: invalid parameter\n");
-				}else if(ret == SGX_ERROR_OUT_OF_MEMORY){
-					PrintError("secure_verify: enclave response encrypt: out of memory\n");
-				}else if(ret == SGX_ERROR_UNEXPECTED){	
-					PrintError("secure_verify: enclave response encrypt: unexcepted error - sgx internal error\n");
-				}else if(ret == SGX_SUCCESS){
-					//PrintError("secure_verify: enclave request decrypt: SUCCESS\n");
-					return ret;
-				}else{
-					PrintError("secure_verify: enclave request decrypt: Fatal Error - Undocumented Error!?\n");
-					return ret;
-				}	
+		PrintError("Debug: Enclave MAC: \n");
+		PrintError_array(&p_ver_msg_out->mac[0]);
+	}
 
-    return ret;
+	if (ret == SGX_ERROR_INVALID_PARAMETER) {
+		PrintError(
+				"secure_verify: enclave response encrypt: invalid parameter\n");
+	} else if (ret == SGX_ERROR_OUT_OF_MEMORY) {
+		PrintError("secure_verify: enclave response encrypt: out of memory\n");
+	} else if (ret == SGX_ERROR_UNEXPECTED) {
+		PrintError(
+				"secure_verify: enclave response encrypt: unexcepted error - sgx internal error\n");
+	} else if (ret == SGX_SUCCESS) {
+		//PrintError("secure_verify: enclave request decrypt: SUCCESS\n");
+		return ret;
+	} else {
+		PrintError(
+				"secure_verify: enclave request decrypt: Fatal Error - Undocumented Error!?\n");
+		return ret;
+	}
+
+	return ret;
 }

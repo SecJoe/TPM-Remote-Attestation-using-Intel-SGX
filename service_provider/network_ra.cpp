@@ -114,8 +114,7 @@ int ra_network_send_receive(const char *server_url,
 	case TYPE_RA_TPM_ATT_RESPONSE:
 		ret = sp_ra_proc_msg_tpm_attest_confirm((tpm_enc_att_state_response_message_t*)((uint8_t*)p_req +
             sizeof(ra_samp_request_header_t)),
-            p_req->size,
-            &p_resp_msg);
+            p_req->size);
         if(0 != ret)
         {
             fprintf(stderr, "\nError, call sp_ra_proc_msg_tpm_attest_confirm fail [%s].",

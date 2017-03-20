@@ -47,7 +47,6 @@ enclave {
     										[in,size=tpm_attest_data_size] uint8_t *tpm_attest_data,
     										uint32_t tpm_attest_data_size,
     										[in] sgx_ec256_signature_t *tpm_signature,
-											uint32_t tpm_pcr_size,
 											[out,size=ver_msg_size] tpm_enc_att_state_response_message_t *p_ver_msg_out,
 											uint32_t ver_msg_size);
     };

@@ -28,7 +28,11 @@ My project in more detail:
 - In my project I load a TPM Quote in the App (untrusted code) memory. 
 - After that I check some requirements like
 	a) Size limitations of data blocks into the Quote 
-	b) limitations regarding the used signature algorithm by the TPM. SGX does not support RSA in the standard sgx_tcypto library. So is had to use Elliptic Curve Digital Signature Algorithm (ECDSA) in the TPM Quotes. Also SGX supprts only the specific ECC curves (secp256r1 also called NIST P-256, P-256 or prime256v1). I will check that requirements too.
+	b) limitations regarding the used signature algorithm by the TPM. SGX does not support RSA
+       in the standard sgx_tcypto library. So is had to use Elliptic Curve Digital Signature
+       Algorithm (ECDSA) in the TPM Quotes. Also SGX supprts only the specific ECC curves
+	   (secp256r1 also called NIST P-256, P-256 or prime256v1). I will check that requirements
+	   too.
 	c)  ...................
 
 Later, I will add later more text............................................................

@@ -1,5 +1,5 @@
 ----------------------------
-summary
+Summary
 ----------------------------
 Verifiy a TPM Quote in an enclave and attest the verification state to a remote party over a secure connection channel.
 

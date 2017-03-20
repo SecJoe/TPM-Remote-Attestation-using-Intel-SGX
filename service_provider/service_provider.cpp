@@ -49,7 +49,6 @@
 
 #include <openssl/bio.h>
 #include <openssl/evp.h>
-//#include <openssl/aes.h>
 
 #ifndef SAFE_FREE
 #define SAFE_FREE(ptr) {if (NULL != (ptr)) {free(ptr); (ptr) = NULL;}}
@@ -61,6 +60,7 @@
 
 // This is supported extended epid group of SP. SP can support more than one
 // extended epid group with different extended epid group id and credentials.
+//TODO: ????
 static const sample_extended_epid_group g_extended_epid_groups[] = {
     {
         0,
@@ -110,11 +110,8 @@ typedef struct _sp_db_item_t
     sample_ec_priv_t            b;
     sample_ps_sec_prop_desc_t   ps_sec_prop;
 }sp_db_item_t;
+
 static sp_db_item_t g_sp_db;
-
-//-----TODOs------
-////TODO: treat time out of network response in sp as attestation failure.
-
 static const sample_extended_epid_group* g_sp_extended_epid_group_id= NULL;
 static bool g_is_sp_registered = false;
 static int g_sp_credentials = 0;
@@ -125,36 +122,40 @@ int gcm_counter = 0;
 
 sample_spid_t g_spid;
 
-
-void PRINT_BYTE_ARRAY(
-    FILE *file, void *mem, uint32_t len)
-{
-    if(!mem || !len)
-    {
-        fprintf(file, "\n( null )\n");
-        return;
-    }
-    uint8_t *array = (uint8_t *)mem;
-    fprintf(file, "%u bytes:\n{\n", len);
-    uint32_t i = 0;
-    for(i = 0; i < len - 1; i++)
-    {
-        fprintf(file, "0x%x, ", array[i]);
-        if(i % 8 == 7) fprintf(file, "\n");
-    }
-    fprintf(file, "0x%x ", array[i]);
-    fprintf(file, "\n}\n");
+//needed for debugging. Print out an array.
+void PRINT_BYTE_ARRAY(FILE *file, void *mem, uint32_t len) {
+	if (!mem || !len) {
+		fprintf(file, "\n( null )\n");
+		return;
+	}
+	uint8_t *array = (uint8_t *) mem;
+	fprintf(file, "%u bytes:\n{\n", len);
+	uint32_t i = 0;
+	for (i = 0; i < len - 1; i++) {
+		fprintf(file, "0x%x, ", array[i]);
+		if (i % 8 == 7)
+			fprintf(file, "\n");
+	}
+	fprintf(file, "0x%x ", array[i]);
+	fprintf(file, "\n}\n");
 }
 
-void handleErrors(){
-//TODO: rename
+void handleOpenSSLErrors(){
 printf("Error in crypto method");
 
 }
 
-//Code inspired from https://wiki.openssl.org/index.php/EVP_Symmetric_Encryption_and_Decryption
-int openssl_aes_gcm_decrypt(unsigned char *ciphertext, int ciphertext_len, unsigned char *aad,
-	int aad_len, unsigned char *tag, unsigned char *key, unsigned char *iv,
+/* Decrypt the AES_GCM packet. Intel does not provide this operation fur untrusted code (only encryption is implemented from Intel)
+* So i had to implement that operation in openssl.
+* Code inspired from https://wiki.openssl.org/index.php/EVP_Symmetric_Encryption_and_Decryption
+* @param ciphertext: The encrypted packet (input)
+* @param ciphertext_len: The encrypted packet size (input)
+* @param tag: Thats the MAC value needed for AES_GCM (input).
+* @param key: Thats the key needed to decrypt the packet (input).
+* @param iv: A iv is a Nonce needed to ensure the freshness (input).
+* @param plaintext: Thats the decrypted plaintext (output).
+*/
+int openssl_aes_gcm_decrypt(unsigned char *ciphertext, int ciphertext_len, unsigned char *tag, unsigned char *key, unsigned char *iv,
 	unsigned char *plaintext)
 {
 
@@ -163,28 +164,28 @@ int openssl_aes_gcm_decrypt(unsigned char *ciphertext, int ciphertext_len, unsig
 	int plaintext_len;
 	int ret;
 	/* Create and initialise the context */
-	if(!(ctx = EVP_CIPHER_CTX_new())) handleErrors();
+	if(!(ctx = EVP_CIPHER_CTX_new())) handleOpenSSLErrors();
 
 	/* Initialise the decryption operation. */
 	if(!EVP_DecryptInit_ex(ctx, EVP_aes_128_gcm(), NULL, NULL, NULL))
-		handleErrors();
+		handleOpenSSLErrors();
 	/* Set IV length. Not necessary if this is 12 bytes (96 bits) */
 	if(!EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_GCM_SET_IVLEN, 12, NULL))
-		handleErrors();
+		handleOpenSSLErrors();
 	/* Initialise key and IV */
-	if(!EVP_DecryptInit_ex(ctx, NULL, NULL, key, iv)) handleErrors();
+	if(!EVP_DecryptInit_ex(ctx, NULL, NULL, key, iv)) handleOpenSSLErrors();
 
 	/* Provide the message to be decrypted, and obtain the plaintext output.
 	 * EVP_DecryptUpdate can be called multiple times if necessary
 	 */
 
 	if(!EVP_DecryptUpdate(ctx, plaintext, &len, ciphertext, ciphertext_len))
-		handleErrors();
+		handleOpenSSLErrors();
 	plaintext_len = len;
 
 	/* Set expected tag value. Works in OpenSSL 1.0.1d and later */
 	if(!EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_GCM_SET_TAG, 16, tag))
-		handleErrors();
+		handleOpenSSLErrors();
 	/* Finalise the decryption. A positive return value indicates success,
 	 * anything else is a failure - the plaintext is not trustworthy.
 	 */
@@ -208,40 +209,46 @@ int openssl_aes_gcm_decrypt(unsigned char *ciphertext, int ciphertext_len, unsig
 
 
 
-//AES-GCM describes the iv as a number that must be unique.
-//So you can call it Nonce. The iv/Nonce is needed to avoid reply-attacks. 
-//AES-GCM needs a AES_GCM_IV_SIZE==12 bytes Nonce.
-//Because of the uniqueness, i add a counter at the end of the ramdom number. 
-int generate_GCM_Nonce(uint8_t *dest_mem, int nonce_size){
+/* AES-GCM describes the iv as a number that must be unique.
+* So you can call it Nonce. The iv/Nonce is needed to avoid reply-attacks. 
+* AES-GCM needs a AES_GCM_IV_SIZE==12 bytes Nonce.
+* Because of the uniqueness, i add a counter at the end of the ramdom number. 
+*/
+int generate_GCM_Nonce(uint8_t *dest_mem, int nonce_size) {
 
 	//pre-checks
-	if(nonce_size < 4){
-		fprintf(stderr, "\nNonce needs to be greater than 3 [%s].", __FUNCTION__);
+	if (nonce_size < 4) {
+		fprintf(stderr, "\nNonce needs to be greater than 3 [%s].",
+				__FUNCTION__);
 		return -1;
 	}
-	int random_size = nonce_size-4;
-	
+	int random_size = nonce_size - 4;
+
 	//generate random value
 	int randomGenerator = open("/dev/random", O_RDONLY);
 	size_t randomDataLen = 0;
-	while (randomDataLen < random_size)
-	{
-    	ssize_t result = read(randomGenerator, dest_mem + randomDataLen, (random_size) - randomDataLen);
-    	if (result < 0)
-    	{
-    		fprintf(stderr, "\nCant read /dev/random, in function [%s].", __FUNCTION__);
-    	}	
-    	randomDataLen += result;
+	while (randomDataLen < random_size) {
+		ssize_t result = read(randomGenerator, dest_mem + randomDataLen,
+				(random_size) - randomDataLen);
+		if (result < 0) {
+			fprintf(stderr, "\nCant read /dev/random, in function [%s].",
+					__FUNCTION__);
+		}
+		randomDataLen += result;
 	}
 	close(randomGenerator);
-	
+
 	//attach 4 byte number (counter) to random number.
 	//thats needed to guarantee uniqueness.
 	gcm_counter++;
 	dest_mem[random_size] = (uint8_t) gcm_counter;
 }
 
-// Verify message 0 then configure extended epid group.
+
+/* Process the a managing message before the handshake. 
+* @param p_msg0: Thats the message from the app/enclave
+* @param msg0_size: The message size.
+*/
 int sp_ra_proc_msg0_req(const sample_ra_msg0_t *p_msg0,
     uint32_t msg0_size)
 {
@@ -263,15 +270,18 @@ int sp_ra_proc_msg0_req(const sample_ra_msg0_t *p_msg0,
         (g_sp_extended_epid_group_id != NULL && g_sp_extended_epid_group_id->extended_epid_group_id != extended_epid_group_id))
     {
 printf("!!!!!!Service_provider: Epid not null\n");
+
         // Check to see if the extended_epid_group_id is supported?
         ret = SP_UNSUPPORTED_EXTENDED_EPID_GROUP;
-		//es kann mehrere gruppen geben, aktuell gbts nur eine
+
+		//Multiple groups possible. Acutally just one group.
         for (size_t i = 0; i < sizeof(g_extended_epid_groups) / sizeof(sample_extended_epid_group); i++)
         {
-			//läuft die aktuell einigste gruppe durch, group_id ist aktuell 0.
+			//Group id is actually 0.
             if (g_extended_epid_groups[i].extended_epid_group_id == extended_epid_group_id)
             {
                 g_sp_extended_epid_group_id = &(g_extended_epid_groups[i]);
+
                 // In the product, the SP will establish a mutually
                 // authenticated SSL channel. During the enrollment process, the ISV
                 // registers it exchanges TLS certs with attestation server and obtains an SPID and
@@ -301,7 +311,11 @@ printf("!!!!!!Service_provider: Epid not null\n");
     return ret;
 }
 
-// Verify message 1 then generate and return message 2 to isv.
+/* Process the first handshake remote attestation message and returns handshake message 2 (which will be sent back to the app/enclave later). 
+* @param p_msg1: Thats the message from the app/enclave
+* @param msg1_size: The message size.
+* @param pp_msg2: Thats the second handshake message.
+*/
 int sp_ra_proc_msg1_req(const sample_ra_msg1_t *p_msg1,
 						uint32_t msg1_size,
 						ra_samp_response_header_t **pp_msg2)
@@ -571,7 +585,12 @@ int sp_ra_proc_msg1_req(const sample_ra_msg1_t *p_msg1,
     return ret;
 }
 
-// Process remote attestation message 3
+/* Process the third handshake remote attestation message and return TPM remote attestation state request message (which will be sent back to the app/enclave later). 
+* @param p_msg3: Thats the message ffrom the app/enclave
+* @param p_size: The message size.
+* @param pp_att_result_msg: Thats the response message. This message serves as TPM remote attestation state request message.
+*/
+
 int sp_ra_proc_msg3_req(const sample_ra_msg3_t *p_msg3,
                         uint32_t msg3_size,
                         ra_samp_response_header_t **pp_att_result_msg)
@@ -842,8 +861,6 @@ int sp_ra_proc_msg3_req(const sample_ra_msg3_t *p_msg3,
            (isv_policy_passed == true))
         {
 
-		//TODO rework indentation of code.
-
 		ret = sample_rijndael128GCM_encrypt(&g_sp_db.sk_key,
         			(uint8_t *) &p_unencrypted_tpm_att_request_msg->platform_info_blob,
         			sizeof(ias_platform_info_blob_t),
@@ -878,10 +895,15 @@ int sp_ra_proc_msg3_req(const sample_ra_msg3_t *p_msg3,
     return ret;
 }
 
-
+/*
+* Processes the attestation confirm message (TPM attestation result from the enclave).
+* If this function is not called after 5 seconds, an error has occurd (maybe mallicious code has hold back the packet). 
+* I havent implemented this becasue this code works asynchronous (no timer implementatable) but this case can be treated as bad Attestation Result.
+* @param p_tpm_ver_response_msg: The messeage from the enclave.
+* @param ver_msg_size: the size of that message.
+*/
 int sp_ra_proc_msg_tpm_attest_confirm(tpm_enc_att_state_response_message_t *p_tpm_ver_response_msg,
-                        uint32_t ver_msg_size,
-                        ra_samp_response_header_t **no)
+                        uint32_t ver_msg_size)
 {
 	int ret = 0;
 	FILE* OUTPUT = stdout;
@@ -903,7 +925,7 @@ int sp_ra_proc_msg_tpm_attest_confirm(tpm_enc_att_state_response_message_t *p_tp
 			PRINT_BYTE_ARRAY(OUTPUT,plaintext, AES_GCM_IV_SIZE);
 	}
 
-	ret = openssl_aes_gcm_decrypt(&p_tpm_ver_response_msg->ciphertext[0], sizeof(tpm_platform_info_blob_t), NULL, 0, &p_tpm_ver_response_msg->mac[0], &g_sp_db.sk_key[0], &p_tpm_ver_response_msg->nonce.nonce[0], (uint8_t *) plaintext);
+	ret = openssl_aes_gcm_decrypt(&p_tpm_ver_response_msg->ciphertext[0], sizeof(tpm_platform_info_blob_t), &p_tpm_ver_response_msg->mac[0], &g_sp_db.sk_key[0], &p_tpm_ver_response_msg->nonce.nonce[0], (uint8_t *) plaintext);
 
 	if(ret == -1){
 		printf("Service Provider, response decrypt failed!!!!\n");
@@ -915,7 +937,7 @@ int sp_ra_proc_msg_tpm_attest_confirm(tpm_enc_att_state_response_message_t *p_tp
 		return -1;
 	}
 
-	//check if Nonce in the response pakcet is the same in the request packet.
+	//check if Nonce in the response packet is the same as in the request packet.
 	ret = memcmp(&p_tpm_ver_response_msg->nonce.nonce[0], &actual_nonce[0], AES_GCM_IV_SIZE);
 	if(ret){
 		fprintf(stderr, "\nError, nonce not correct. Maybe someone performs a replay-attack? [%s].", __FUNCTION__);
